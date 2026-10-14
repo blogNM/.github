@@ -54,6 +54,8 @@
 
 ## 한눈에 보는 흐름
 
+> 개발을 몰라도 보기 쉽게 정리한 버전: [쉽게 보는 Creat_ 구조](https://github.com/blogNM/blogproject/blob/main/docs/05-guides/쉽게-보는-구조.md)
+
 ### 글 하나가 쓰이고 읽히기까지
 
 ```mermaid
@@ -65,7 +67,7 @@ flowchart TD
     B -- 예 --> E["내가 속한 블로그 고르기<br/>없으면 블로그 만들기 · 참여 신청"]
     E --> F["편집기에서 글쓰기<br/>보이는 그대로 · 사진 · 태그 · 체크박스 목록"]
     F --> G["저장"]
-    G --> H["학교 Nginx(https) → 우리 서버"]
+    G --> H["학교 Nginx(https) → 우리 Nginx → 앱 두 대 중 하나"]
     H --> I{"보안 확인<br/>로그인·CSRF·역할"}
     I -- 통과 못 함 --> X["거절 (401 / 403)"]
     I -- 통과 --> J["본문 정리<br/>마크다운 → HTML → jsoup으로 위험한 태그 제거"]
@@ -86,10 +88,10 @@ flowchart TD
     C -- 실패 --> Z["배포 멈춤<br/>사이트는 그대로"]
     C -- 통과 --> D["Docker 이미지 만들기"]
     D --> E["학교 서버로 보내기 (SSH)"]
-    E --> F["deploy.sh<br/>새 컨테이너 띄우기"]
-    F --> G{"90초 안에<br/>열리나?"}
-    G -- 예 --> H(["새 버전으로 운영"])
-    G -- 아니요 --> I["바로 전 이미지로 되돌림"]
+    E --> F["deploy.sh<br/>앱 두 대를 한 대씩 새 버전으로"]
+    F --> G{"새 앱이<br/>잘 열리나?"}
+    G -- 예 --> H(["새 버전으로 운영<br/>바꾸는 동안에도 사이트가 안 멈춤"])
+    G -- 아니요 --> I["그 자리를 바로 전 컨테이너로 되돌림"]
     H --> J["버전 만들기 (선택)"]
     J --> K["GitHub Releases<br/>+ 사이트 공지사항 · 회원 알림"]
 ```
@@ -164,7 +166,7 @@ flowchart TD
 
 Creat_는 **Spring Boot 서버 하나**가 화면 파일(정적 HTML + JS)과 API를 함께 내보내는 구조입니다. 기능은 패키지로 나누고, 블로그별 역할 확인·XSS·CSRF처럼 모든 기능에 걸리는 규칙은 [헌법](https://github.com/blogNM/blogproject/blob/main/.specify/memory/constitution.md)에 모아 한 곳에서 처리합니다. 나중에 서버를 늘릴 수 있도록 로그인은 쿠키(JWT)에 담고, 인증번호·횟수 같은 값은 서버 메모리가 아니라 DB에 둡니다.
 
-![Creat_ 구조 — 브라우저, 학교 Nginx(HTTPS), 학교 서버의 Docker 컨테이너(Spring Security와 기능 패키지 16개, 정적 화면), MySQL·사진 폴더·Gmail·구글·네이버·카카오·Turnstile, 진행 중인 서버 두 대 구성, GitHub Actions의 배포와 버전 만들기 순서](architecture.svg)
+![Creat_ 구조 — 브라우저, 학교 Nginx(HTTPS), 학교 서버의 Docker 컨테이너(Spring Security와 기능 패키지 16개, 정적 화면), MySQL·사진 폴더·Gmail·구글·네이버·카카오·Turnstile, 우리 Nginx와 앱 두 대 구성, GitHub Actions의 배포와 버전 만들기 순서](architecture.svg)
 
 ### 패키지
 
@@ -272,9 +274,9 @@ sequenceDiagram
 
 ### 배포
 
-`main`에 `app/` 변경이 들어오면 GitHub Actions의 **배포** 작업이 ① MySQL 8을 띄워 `./gradlew test`를 돌리고 ② `bootJar`와 `Dockerfile`로 `creat-blog` 이미지를 만들어 ③ SSH로 학교 서버에 보낸 뒤 ④ [`deploy.sh`](https://github.com/blogNM/blogproject/blob/main/app/deploy/deploy.sh)가 컨테이너를 새로 띄웁니다. 90초 안에 사이트가 열리지 않으면 로그를 보여 주고 바로 전 이미지로 되돌립니다. HTTPS는 학교 공용 Nginx가 풀어 주고, 앱 컨테이너는 서버 포트 8340에서 받습니다. 자세한 내용은 [도커 배포 안내](https://github.com/blogNM/blogproject/blob/main/docs/05-guides/도커-배포.md)에 있습니다.
+`main`에 `app/` 변경이 들어오면 GitHub Actions의 **배포** 작업이 ① MySQL 8을 띄워 `./gradlew test`를 돌리고 ② `bootJar`와 `Dockerfile`로 `creat-blog` 이미지를 만들어 ③ SSH로 학교 서버에 보낸 뒤 ④ [`deploy.sh`](https://github.com/blogNM/blogproject/blob/main/app/deploy/deploy.sh)가 앱 두 대를 한 대씩 새 이미지로 바꿉니다(롤링 무중단 배포). 앱 b(8342)를 바꾸고 `/api/health`로 확인한 뒤 10초 기다렸다가 앱 a(8341)를 바꾸며, 그동안 다른 한 대가 요청을 받아서 사이트가 멈추지 않습니다. 새 앱이 열리지 않으면 그 자리를 바로 전 컨테이너로 되돌립니다. HTTPS는 학교 공용 Nginx가 풀어 주고, 서버 포트 8340의 우리 Nginx(`creat-blog-lb`)가 두 앱에 번갈아 나눠 줍니다. 두 앱은 같은 DB·사진 폴더·JWT 키를 써서 어느 쪽이 받아도 결과가 같습니다. 자세한 내용은 [도커 배포 안내](https://github.com/blogNM/blogproject/blob/main/docs/05-guides/도커-배포.md)에 있습니다.
 
-> **진행 중 — 서버 두 대·롤링 무중단 배포.** 지금은 배포할 때마다 컨테이너를 바꾸는 몇 초 동안 사이트가 멈춥니다. 학교 Nginx → 우리 Nginx(8340) → 앱 두 대(8341·8342) 구조로 바꾸고, 한 대씩 새 이미지로 바꾸는 동안 다른 한 대가 요청을 받게 하는 작업을 서버에서 확인하고 있습니다. 아직 `main`의 배포 방식은 앱 한 대입니다.
+> **서버 두 대·롤링 무중단 배포 (v1.6.0).** 학교 Nginx → 우리 Nginx(8340) → 앱 a(8341)·앱 b(8342) 구조로 바꿔서, 업데이트할 때 사이트가 멈추던 시간이 약 10초에서 0초가 됐습니다. 구글·네이버·카카오 로그인의 확인값은 서버 메모리 대신 암호화한 쿠키에 두어, 돌아온 요청이 다른 앱으로 가도 로그인됩니다. [v1.6.0 릴리스 노트](https://github.com/blogNM/blogproject/blob/main/docs/releases/v1.6.0.md)
 
 ## 저장소
 
@@ -367,7 +369,7 @@ SQL
 | JUnit 5 · Spring Boot Test · Spring Security Test | 서버 테스트 파일 28개. 실제 MySQL(`blog_test`)로 돌립니다 |
 | GitHub Actions | 배포(테스트 → 이미지 → 서버), 버전 만들기(GitHub 릴리스 + 사이트 공지), 서버 상태 확인 |
 | Docker | `eclipse-temurin:21-jre` 이미지 하나, 자바 메모리 512MB |
-| Nginx | 학교 공용 Nginx가 HTTPS를 풀어 앱으로 넘김. 서버 두 대 구성은 진행 중 |
+| Nginx | 학교 공용 Nginx가 HTTPS를 풀고, 8340의 우리 Nginx(nginx:alpine)가 앱 두 대(8341·8342)에 나눠 줌 |
 
 ## 개발 방식
 
@@ -383,7 +385,7 @@ SQL
 
 | 버전 | 날짜 | 주요 내용 | 기록 |
 | --- | --- | --- | --- |
-| v1.6.0 | 준비 중 | 서버 두 대·롤링 무중단 배포 확인 (진행 중) | — |
+| v1.6.0 | 2026-10-14 | 서버 두 대·롤링 무중단 배포, 업데이트 중 멈춤 약 10초 → 0초 | [보기](https://github.com/blogNM/blogproject/releases/tag/v1.6.0) |
 | v1.5.0 | 2026-10-14 | 체크박스 목록, 글자 크기를 키워도 굵어지지 않게 | [보기](https://github.com/blogNM/blogproject/releases/tag/v1.5.0) |
 | v1.4.1 | 2026-10-13 | 새로고침 약 6배, 검색 최대 10배 빨라짐 | [보기](https://github.com/blogNM/blogproject/releases/tag/v1.4.1) |
 | v1.4.0 | 2026-10-13 | 네이버·카카오 로그인, 다른 카카오·구글 계정으로 로그인 | [보기](https://github.com/blogNM/blogproject/releases/tag/v1.4.0) |
